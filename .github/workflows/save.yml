@@ -1,28 +1,45 @@
-name: Save and Restore Files
+name: Save and Restore Windows Files
 
 on:
-  workflow_dispatch: # permite rodar manualmente
+  workflow_dispatch: # para rodar manualmente
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  prepare:
     runs-on: windows-latest
-
     steps:
       - name: Checar código
         uses: actions/checkout@v3
 
-      - name: Baixar arquivos necessários
+      - name: Baixar ou gerar arquivos
         run: |
-          # exemplo: baixar arquivos da internet ou gerar
+          echo "Baixando arquivos grandes..."
+          # Exemplo de download
           curl -L -o arquivo1.zip "https://exemplo.com/arquivo1.zip"
           curl -L -o arquivo2.zip "https://exemplo.com/arquivo2.zip"
 
-      - name: Salvar arquivos como artifact
+      - name: Salvar arquivos como artifacts
         uses: actions/upload-artifact@v3
         with:
           name: meus-arquivos
           path: |
             arquivo1.zip
             arquivo2.zip
+
+  use_saved_files:
+    runs-on: windows-latest
+    needs: prepare
+    steps:
+      - name: Checar código
+        uses: actions/checkout@v3
+
+      - name: Baixar arquivos salvos
+        uses: actions/download-artifact@v3
+        with:
+          name: meus-arquivos
+          path: ./meus-arquivos
+
+      - name: Verificar arquivos
+        run: |
+          dir ./meus-arquivos
