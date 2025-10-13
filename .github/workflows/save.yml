@@ -1,0 +1,80 @@
+name: Backup e Restore Completo da VPS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v3
+
+      # Criar pasta de backup
+      - name: Criar pasta de backup
+        run: |
+          New-Item -ItemType Directory -Path "$env:USERPROFILE\VPSBackup" -Force
+
+      # Copiar arquivos do usuário (Documentos, Desktop, Downloads, etc.)
+      - name: Copiar arquivos do usuário
+        run: |
+          $folders = @("Documents", "Desktop", "Downloads", "Pictures", "AppData\Roaming")
+          foreach ($f in $folders) {
+            $source = Join-Path $env:USERPROFILE $f
+            $dest = Join-Path "$env:USERPROFILE\VPSBackup" $f
+            if (Test-Path $source) {
+              Copy-Item $source $dest -Recurse -Force
+            }
+          }
+
+      # Salvar scripts de instalação dos programas
+      - name: Salvar scripts de instalação
+        run: |
+          Copy-Item "$env:GITHUB_WORKSPACE\install_scripts" "$env:USERPROFILE\VPSBackup\install_scripts" -Recurse -Force
+
+      # Upload do artifact (versão atualizada para v4)
+      - name: Upload do backup completo
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-full-backup
+          path: ${{ env.USERPROFILE }}\VPSBackup
+
+  restore:
+    runs-on: windows-latest
+    needs: backup
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v3
+
+      # Baixar backup completo (compatível com v4)
+      - name: Baixar backup
+        uses: actions/download-artifact@v3
+        with:
+          name: vps-full-backup
+          path: ${{ env.USERPROFILE }}\VPSBackup
+
+      # Restaurar arquivos do usuário
+      - name: Restaurar arquivos
+        run: |
+          $backupPath = "$env:USERPROFILE\VPSBackup"
+          $folders = @("Documents", "Desktop", "Downloads", "Pictures", "AppData\Roaming")
+          foreach ($f in $folders) {
+            $source = Join-Path $backupPath $f
+            $dest = Join-Path $env:USERPROFILE $f
+            if (Test-Path $source) {
+              Copy-Item $source $dest -Recurse -Force
+            }
+          }
+
+      # Executar scripts de instalação para reinstalar programas
+      - name: Executar scripts de instalação
+        run: |
+          $scriptFolder = "$env:USERPROFILE\VPSBackup\install_scripts"
+          if (Test-Path $scriptFolder) {
+            Get-ChildItem $scriptFolder -Filter *.ps1 | ForEach-Object {
+              Write-Host "Executando $_"
+              & $_.FullName
+            }
+          }
