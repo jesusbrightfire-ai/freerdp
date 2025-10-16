@@ -27,13 +27,27 @@ jobs:
         shell: powershell
         run: |
           Write-Host "Instalando Tailscale..."
-          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup.exe -OutFile tailscale-setup.exe
-          Start-Process .\tailscale-setup.exe -Wait
-          Write-Host "Iniciando Tailscale..."
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey ${{ secrets.TAILSCALE_KEY }} --hostname planny-vps --accept-routes --ssh
+          try {
+            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup.exe" -OutFile "tailscale-setup.exe" -UseBasicParsing
+          } catch {
+            Write-Host "⚠️ Falha ao baixar Tailscale. Tentando novamente..."
+            Start-Sleep -Seconds 5
+            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup.exe" -OutFile "tailscale-setup.exe" -UseBasicParsing
+          }
+
+          if (-Not (Test-Path "tailscale-setup.exe")) {
+            throw "❌ Falha ao baixar o instalador do Tailscale!"
+          }
+
+          Write-Host "✅ Instalador baixado com sucesso. Instalando..."
+          Start-Process -FilePath "tailscale-setup.exe" -Wait
+
+          Write-Host "🔗 Conectando ao Tailscale..."
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey ${{ secrets.TAILSCALE_KEY }} --hostname vps-auto --accept-routes --ssh
 
       # 🔒 Define uma senha fixa para o usuário padrão
       - name: 🔒 Definir senha fixa
+        shell: powershell
         run: |
           $senha = "@vps123"
           net user runneradmin $senha
@@ -41,6 +55,7 @@ jobs:
 
       # 🖥️ Mostrar informações de acesso
       - name: 🪪 Mostrar credenciais RDP
+        shell: powershell
         run: |
           Write-Host "=============================="
           Write-Host "💻 Usuário: runneradmin"
@@ -50,6 +65,7 @@ jobs:
 
       # 🟢 Mantém a VPS ativa por 6h
       - name: ⏳ Mantendo VPS ativa
+        shell: powershell
         run: |
           Write-Host "Mantendo VPS ativa por 6 horas..."
           Start-Sleep -Seconds 21600
