@@ -1,46 +1,62 @@
-name: VPS Windows Infinita com Backup + Tailscale
+name: VPS Automática com Backup e Tailscale
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"  # Executa automaticamente a cada 6h
-  workflow_dispatch:        # Também pode ser iniciada manualmente
+    - cron: "0 */6 * * *"  # executa a cada 6 horas
 
 jobs:
   vps:
     runs-on: windows-latest
-    timeout-minutes: 360  # Mantém ativa por 6 horas (360 min)
+    timeout-minutes: 360  # 6h
 
     steps:
-      - name: 📁 Baixar repositório
-        uses: actions/checkout@v4
+      - name: 📦 Baixar repositório
+        uses: actions/checkout@v3
 
-      # 🔄 Restaura o backup anterior, se existir
-      - name: 🔄 Restaurar backup anterior (Área de Trabalho)
-        uses: actions/download-artifact@v4
+      # 🧩 Restaura o backup da área de trabalho
+      - name: 💾 Restaurar backup anterior (Área de Trabalho)
+        uses: actions/download-artifact@v3
         with:
-          name: backup-desktop
-          path: "C:\\Users\\runneradmin\\Desktop"
+          name: vps-backup
+          path: ${{ env.USERPROFILE }}\Desktop
         continue-on-error: true
 
-      # ⚙️ Instala e conecta Tailscale
-      - name: 🌐 Conectar ao Tailscale
+      # 🌀 Instalar e conectar ao Tailscale
+      - name: 🔗 Conectar ao Tailscale
+        shell: powershell
         run: |
           Write-Host "Instalando Tailscale..."
-          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile tailscale.msi
-          Start-Process msiexec.exe -Wait -ArgumentList '/i tailscale.msi /quiet'
-          tailscale up --authkey ${{ secrets.TAILSCALE_AUTH_KEY }} --hostname planny-vps --accept-routes --ssh
-          tailscale ip -4
-          Write-Host "✅ Tailscale conectado. Agora tu pode acessar via IP acima."
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup.exe -OutFile tailscale-setup.exe
+          Start-Process .\tailscale-setup.exe -Wait
+          Write-Host "Iniciando Tailscale..."
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey ${{ secrets.TAILSCALE_KEY }} --hostname planny-vps --accept-routes --ssh
 
-      # ⏳ Mantém a VPS rodando por 6 horas
-      - name: 🕓 Mantendo VPS ativa
+      # 🔒 Define uma senha fixa para o usuário padrão
+      - name: 🔒 Definir senha fixa
         run: |
-          Write-Host "A VPS ficará ativa por 6 horas. Tudo que salvar na Área de Trabalho será preservado."
-          Start-Sleep -Seconds 21600  # 6h
+          $senha = "@vps123"
+          net user runneradmin $senha
+          Write-Host "✅ Senha fixa definida: $senha"
 
-      # 💾 Faz backup automático da Área de Trabalho antes de expirar
-      - name: 💾 Fazer backup da Área de Trabalho
-        uses: actions/upload-artifact@v4
+      # 🖥️ Mostrar informações de acesso
+      - name: 🪪 Mostrar credenciais RDP
+        run: |
+          Write-Host "=============================="
+          Write-Host "💻 Usuário: runneradmin"
+          Write-Host "🔑 Senha: @vps123"
+          Write-Host "🌐 Use o IP do Tailscale pra conectar via RDP"
+          Write-Host "=============================="
+
+      # 🟢 Mantém a VPS ativa por 6h
+      - name: ⏳ Mantendo VPS ativa
+        run: |
+          Write-Host "Mantendo VPS ativa por 6 horas..."
+          Start-Sleep -Seconds 21600
+
+      # 💾 Faz backup da Área de Trabalho ao final
+      - name: 💽 Fazer backup da Área de Trabalho
+        uses: actions/upload-artifact@v3
         with:
-          name: backup-desktop
-          path: "C:\\Users\\runneradmin\\Desktop"
+          name: vps-backup
+          path: ${{ env.USERPROFILE }}\Desktop
