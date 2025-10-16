@@ -1,0 +1,46 @@
+name: VPS Windows Infinita com Backup + Tailscale
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"  # Executa automaticamente a cada 6h
+  workflow_dispatch:        # Também pode ser iniciada manualmente
+
+jobs:
+  vps:
+    runs-on: windows-latest
+    timeout-minutes: 360  # Mantém ativa por 6 horas (360 min)
+
+    steps:
+      - name: 📁 Baixar repositório
+        uses: actions/checkout@v4
+
+      # 🔄 Restaura o backup anterior, se existir
+      - name: 🔄 Restaurar backup anterior (Área de Trabalho)
+        uses: actions/download-artifact@v4
+        with:
+          name: backup-desktop
+          path: "C:\\Users\\runneradmin\\Desktop"
+        continue-on-error: true
+
+      # ⚙️ Instala e conecta Tailscale
+      - name: 🌐 Conectar ao Tailscale
+        run: |
+          Write-Host "Instalando Tailscale..."
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile tailscale.msi
+          Start-Process msiexec.exe -Wait -ArgumentList '/i tailscale.msi /quiet'
+          tailscale up --authkey ${{ secrets.TAILSCALE_AUTH_KEY }} --hostname planny-vps --accept-routes --ssh
+          tailscale ip -4
+          Write-Host "✅ Tailscale conectado. Agora tu pode acessar via IP acima."
+
+      # ⏳ Mantém a VPS rodando por 6 horas
+      - name: 🕓 Mantendo VPS ativa
+        run: |
+          Write-Host "A VPS ficará ativa por 6 horas. Tudo que salvar na Área de Trabalho será preservado."
+          Start-Sleep -Seconds 21600  # 6h
+
+      # 💾 Faz backup automático da Área de Trabalho antes de expirar
+      - name: 💾 Fazer backup da Área de Trabalho
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-desktop
+          path: "C:\\Users\\runneradmin\\Desktop"
