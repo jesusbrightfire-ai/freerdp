@@ -14,7 +14,7 @@ jobs:
       - name: 📦 Baixar repositório
         uses: actions/checkout@v4
 
-      # 🧩 Restaura o backup da área de trabalho
+      # 🧩 Restaura o backup da área de trabalho (se existir)
       - name: 💾 Restaurar backup anterior (Área de Trabalho)
         uses: actions/download-artifact@v4
         with:
@@ -22,36 +22,25 @@ jobs:
           path: ${{ env.USERPROFILE }}\Desktop
         continue-on-error: true
 
-      # 🌀 Instalar e conectar ao Tailscale
+      # 🌀 Instalar e conectar ao Tailscale (automático via winget)
       - name: 🔗 Conectar ao Tailscale
         shell: pwsh
         run: |
-          Write-Host "Instalando Tailscale..."
-
-          # Baixar instalador
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup.exe"
-          $out = "tailscale-setup.exe"
-
-          try {
-            Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
-          } catch {
-            Write-Host "⚠️ Falha ao baixar Tailscale. Tentando novamente..."
-            Start-Sleep -Seconds 5
-            Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
-          }
-
-          if (-Not (Test-Path $out)) {
-            throw "❌ Falha ao baixar o instalador do Tailscale!"
-          }
-
-          Write-Host "✅ Instalador baixado. Instalando..."
-          Start-Process -FilePath $out -Wait
+          Write-Host "🚀 Instalando Tailscale via winget (rápido e leve)..."
+          winget install --id=Tailscale.Tailscale --accept-package-agreements --accept-source-agreements -h | Out-Null
 
           Write-Host "🔗 Conectando ao Tailscale..."
           $tailscalePath = "C:\Program Files\Tailscale\tailscale.exe"
           $authkey = "${{ secrets.TAILSCALE_KEY }}"
 
+          if (-not (Test-Path $tailscalePath)) {
+            throw "❌ Tailscale não foi instalado corretamente!"
+          }
+
           & $tailscalePath up --authkey $authkey --hostname "vps-auto" --accept-routes --ssh
+          Write-Host "✅ Conectado com sucesso!"
+          Write-Host "🌐 IP do Tailscale:"
+          & $tailscalePath ip -4
 
       # 🔒 Define uma senha fixa para o usuário padrão
       - name: 🔒 Definir senha fixa
@@ -59,4 +48,28 @@ jobs:
         run: |
           $senha = "@vps123"
           net user runneradmin $senha
-          Write-Host "✅ Senha f
+          Write-Host "✅ Senha fixa definida: $senha"
+
+      # 🖥️ Mostrar informações de acesso
+      - name: 🪪 Mostrar credenciais RDP
+        shell: pwsh
+        run: |
+          Write-Host "=============================="
+          Write-Host "💻 Usuário: runneradmin"
+          Write-Host "🔑 Senha: @vps123"
+          Write-Host "🌐 Conecte-se via IP do Tailscale acima"
+          Write-Host "=============================="
+
+      # 🟢 Mantém a VPS ativa por 6h
+      - name: ⏳ Mantendo VPS ativa
+        shell: pwsh
+        run: |
+          Write-Host "Mantendo VPS ativa por 6 horas..."
+          Start-Sleep -Seconds 21600
+
+      # 💾 Faz backup da Área de Trabalho ao final
+      - name: 💽 Fazer backup da Área de Trabalho
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-backup
+          path: ${{ env.USERPROFILE }}\Desktop
