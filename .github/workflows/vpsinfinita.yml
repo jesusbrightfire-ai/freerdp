@@ -1,75 +1,108 @@
-name: VPS Automática com Backup e Tailscale
+name: VPS Setup
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 */6 * * *"  # executa a cada 6 horas
 
 jobs:
-  vps:
+  setup-vps:
     runs-on: windows-latest
-    timeout-minutes: 360  # 6h
+    timeout-minutes: 20
 
     steps:
+      - name: ⚙️ Set up job
+        run: Write-Host "Inicializando ambiente Windows..."
+
+      # ---------------------------
+      # 1️⃣ Baixar repositório
+      # ---------------------------
       - name: 📦 Baixar repositório
         uses: actions/checkout@v4
 
-      # 🧩 Restaura o backup da área de trabalho (se existir)
+      # ---------------------------
+      # 2️⃣ Restaurar backup (opcional)
+      # ---------------------------
       - name: 💾 Restaurar backup anterior (Área de Trabalho)
-        uses: actions/download-artifact@v4
-        with:
-          name: vps-backup
-          path: ${{ env.USERPROFILE }}\Desktop
-        continue-on-error: true
+        shell: pwsh
+        run: |
+          $backup = "$env:USERPROFILE\Desktop_Backup"
+          $desktop = "$env:USERPROFILE\Desktop"
+          if (Test-Path $backup) {
+            Write-Host "🔄 Restaurando backup anterior..."
+            Copy-Item -Path "$backup\*" -Destination $desktop -Recurse -Force
+          } else {
+            Write-Host "ℹ️ Nenhum backup anterior encontrado."
+          }
 
-      # 🌀 Instalar e conectar ao Tailscale (automático via winget)
+      # ---------------------------
+      # 3️⃣ Conectar ao Tailscale
+      # ---------------------------
       - name: 🔗 Conectar ao Tailscale
         shell: pwsh
         run: |
-          Write-Host "🚀 Instalando Tailscale via winget (rápido e leve)..."
+          Write-Host "🚀 Instalando Tailscale via winget..."
           winget install --id=Tailscale.Tailscale --accept-package-agreements --accept-source-agreements -h | Out-Null
 
-          Write-Host "🔗 Conectando ao Tailscale..."
           $tailscalePath = "C:\Program Files\Tailscale\tailscale.exe"
-          $authkey = "${{ secrets.TAILSCALE_KEY }}"
+          $authkey = '${{ secrets.TAILSCALE_KEY }}'
 
           if (-not (Test-Path $tailscalePath)) {
             throw "❌ Tailscale não foi instalado corretamente!"
           }
 
-          & $tailscalePath up --authkey $authkey --hostname "vps-auto" --accept-routes --ssh
-          Write-Host "✅ Conectado com sucesso!"
-          Write-Host "🌐 IP do Tailscale:"
-          & $tailscalePath ip -4
+          Write-Host "🔗 Conectando ao Tailscale..."
+          & "$tailscalePath" up --authkey "$authkey" --hostname "vps-auto" --accept-routes --ssh
+          if ($LASTEXITCODE -ne 0) {
+            throw "❌ Falha ao conectar ao Tailscale"
+          }
 
-      # 🔒 Define uma senha fixa para o usuário padrão
-      - name: 🔒 Definir senha fixa
+          Write-Host "✅ Conectado ao Tailscale com sucesso!"
+          & "$tailscalePath" ip -4
+
+      # ---------------------------
+      # 4️⃣ Definir senha fixa (para RDP)
+      # ---------------------------
+      - name: 🔐 Definir senha fixa
         shell: pwsh
         run: |
-          $senha = "@vps123"
-          net user runneradmin $senha
-          Write-Host "✅ Senha fixa definida: $senha"
+          $password = ConvertTo-SecureString '${{ secrets.RDP_PASSWORD }}' -AsPlainText -Force
+          $username = "runneradmin"
+          Set-LocalUser -Name $username -Password $password
+          Write-Host "✅ Senha fixa definida para $username"
 
-      # 🖥️ Mostrar informações de acesso
+      # ---------------------------
+      # 5️⃣ Mostrar credenciais RDP
+      # ---------------------------
       - name: 🪪 Mostrar credenciais RDP
         shell: pwsh
         run: |
-          Write-Host "=============================="
-          Write-Host "💻 Usuário: runneradmin"
-          Write-Host "🔑 Senha: @vps123"
-          Write-Host "🌐 Conecte-se via IP do Tailscale acima"
-          Write-Host "=============================="
+          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -eq "Ethernet" }).IPAddress
+          Write-Host "🖥️ Use as credenciais abaixo para conectar via RDP:"
+          Write-Host "Usuário: runneradmin"
+          Write-Host "Senha: ${{ secrets.RDP_PASSWORD }}"
+          Write-Host "IP Local: $ip"
+          Write-Host "🔗 IP Tailscale (recomendado):"
+          & "C:\Program Files\Tailscale\tailscale.exe" ip -4
 
-      # 🟢 Mantém a VPS ativa por 6h
-      - name: ⏳ Mantendo VPS ativa
+      # ---------------------------
+      # 6️⃣ Manter VPS ativa
+      # ---------------------------
+      - name: ♻️ Mantendo VPS ativa
         shell: pwsh
         run: |
-          Write-Host "Mantendo VPS ativa por 6 horas..."
-          Start-Sleep -Seconds 21600
+          Write-Host "⏳ Mantendo VPS ativa por tempo indeterminado..."
+          while ($true) {
+            Start-Sleep -Seconds 60
+          }
 
-      # 💾 Faz backup da Área de Trabalho ao final
-      - name: 💽 Fazer backup da Área de Trabalho
-        uses: actions/upload-artifact@v4
-        with:
-          name: vps-backup
-          path: ${{ env.USERPROFILE }}\Desktop
+      # ---------------------------
+      # 7️⃣ Fazer backup final da Área de Trabalho
+      # ---------------------------
+      - name: 💾 Fazer backup da Área de Trabalho
+        if: always()
+        shell: pwsh
+        run: |
+          $backup = "$env:USERPROFILE\Desktop_Backup"
+          $desktop = "$env:USERPROFILE\Desktop"
+          New-Item -ItemType Directory -Force -Path $backup | Out-Null
+          Copy-Item -Path "$desktop\*" -Destination $backup -Recurse -Force
+          Write-Host "✅ Backup salvo em $backup"
