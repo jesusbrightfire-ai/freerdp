@@ -24,55 +24,39 @@ jobs:
 
       # 🌀 Instalar e conectar ao Tailscale
       - name: 🔗 Conectar ao Tailscale
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Host "Instalando Tailscale..."
+
+          # Baixar instalador
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup.exe"
+          $out = "tailscale-setup.exe"
+
           try {
-            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup.exe" -OutFile "tailscale-setup.exe" -UseBasicParsing
+            Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
           } catch {
             Write-Host "⚠️ Falha ao baixar Tailscale. Tentando novamente..."
             Start-Sleep -Seconds 5
-            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup.exe" -OutFile "tailscale-setup.exe" -UseBasicParsing
+            Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
           }
 
-          if (-Not (Test-Path "tailscale-setup.exe")) {
+          if (-Not (Test-Path $out)) {
             throw "❌ Falha ao baixar o instalador do Tailscale!"
           }
 
-          Write-Host "✅ Instalador baixado com sucesso. Instalando..."
-          Start-Process -FilePath "tailscale-setup.exe" -Wait
+          Write-Host "✅ Instalador baixado. Instalando..."
+          Start-Process -FilePath $out -Wait
 
           Write-Host "🔗 Conectando ao Tailscale..."
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey ${{ secrets.TAILSCALE_KEY }} --hostname vps-auto --accept-routes --ssh
+          $tailscalePath = "C:\Program Files\Tailscale\tailscale.exe"
+          $authkey = "${{ secrets.TAILSCALE_KEY }}"
+
+          & $tailscalePath up --authkey $authkey --hostname "vps-auto" --accept-routes --ssh
 
       # 🔒 Define uma senha fixa para o usuário padrão
       - name: 🔒 Definir senha fixa
-        shell: powershell
+        shell: pwsh
         run: |
           $senha = "@vps123"
           net user runneradmin $senha
-          Write-Host "✅ Senha fixa definida: $senha"
-
-      # 🖥️ Mostrar informações de acesso
-      - name: 🪪 Mostrar credenciais RDP
-        shell: powershell
-        run: |
-          Write-Host "=============================="
-          Write-Host "💻 Usuário: runneradmin"
-          Write-Host "🔑 Senha: @vps123"
-          Write-Host "🌐 Use o IP do Tailscale pra conectar via RDP"
-          Write-Host "=============================="
-
-      # 🟢 Mantém a VPS ativa por 6h
-      - name: ⏳ Mantendo VPS ativa
-        shell: powershell
-        run: |
-          Write-Host "Mantendo VPS ativa por 6 horas..."
-          Start-Sleep -Seconds 21600
-
-      # 💾 Faz backup da Área de Trabalho ao final
-      - name: 💽 Fazer backup da Área de Trabalho
-        uses: actions/upload-artifact@v4
-        with:
-          name: vps-backup
-          path: ${{ env.USERPROFILE }}\Desktop
+          Write-Host "✅ Senha f
