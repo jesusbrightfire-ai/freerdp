@@ -1,108 +1,133 @@
-name: VPS Setup
+name: RDP + Tailscale AutoConnect
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-vps:
+  secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 3600
 
     steps:
-      - name: ⚙️ Set up job
-        run: Write-Host "Inicializando ambiente Windows..."
-
       # ---------------------------
-      # 1️⃣ Baixar repositório
+      # 1️⃣ Configurações principais do RDP
       # ---------------------------
-      - name: 📦 Baixar repositório
-        uses: actions/checkout@v4
-
-      # ---------------------------
-      # 2️⃣ Restaurar backup (opcional)
-      # ---------------------------
-      - name: 💾 Restaurar backup anterior (Área de Trabalho)
+      - name: 🖥️ Configurar RDP
         shell: pwsh
         run: |
-          $backup = "$env:USERPROFILE\Desktop_Backup"
-          $desktop = "$env:USERPROFILE\Desktop"
-          if (Test-Path $backup) {
-            Write-Host "🔄 Restaurando backup anterior..."
-            Copy-Item -Path "$backup\*" -Destination $desktop -Recurse -Force
-          } else {
-            Write-Host "ℹ️ Nenhum backup anterior encontrado."
-          }
+          # Ativar Remote Desktop
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                           -Name "fDenyTSConnections" -Value 0 -Force
+
+          # Desativar autenticação de nível de rede
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                           -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                           -Name "SecurityLayer" -Value 0 -Force
+
+          # Liberar firewall para conexões RDP
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+
+          # Reiniciar serviço RDP
+          Restart-Service -Name TermService -Force
+          Write-Host "✅ RDP habilitado e firewall configurado"
 
       # ---------------------------
-      # 3️⃣ Conectar ao Tailscale
+      # 2️⃣ Criar usuário de acesso RDP
       # ---------------------------
-      - name: 🔗 Conectar ao Tailscale
+      - name: 👤 Criar usuário RDP
+        shell: pwsh
+        run: |
+          $user = "RDP"
+          $password = '${{ secrets.RDP_PASSWORD }}'
+
+          if (-not $password) {
+            Write-Error "❌ ERRO: Nenhuma senha definida em RDP_PASSWORD (secrets)"
+            exit 1
+          }
+
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          if (Get-LocalUser -Name $user -ErrorAction SilentlyContinue) {
+            Write-Host "ℹ️ Usuário RDP já existe, redefinindo senha..."
+            Set-LocalUser -Name $user -Password $securePass
+          } else {
+            New-LocalUser -Name $user -Password $securePass -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member $user
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $user
+          }
+
+          Write-Host "✅ Usuário '$user' criado e habilitado para RDP"
+          echo "RDP_CREDS=User: $user | Password: $password" >> $env:GITHUB_ENV
+
+      # ---------------------------
+      # 3️⃣ Instalar e conectar Tailscale automaticamente (sem login manual)
+      # ---------------------------
+      - name: 🌐 Conectar ao Tailscale
         shell: pwsh
         run: |
           Write-Host "🚀 Instalando Tailscale via winget..."
           winget install --id=Tailscale.Tailscale --accept-package-agreements --accept-source-agreements -h | Out-Null
 
-          $tailscalePath = "C:\Program Files\Tailscale\tailscale.exe"
-          $authkey = '${{ secrets.TAILSCALE_KEY }}'
-
-          if (-not (Test-Path $tailscalePath)) {
-            throw "❌ Tailscale não foi instalado corretamente!"
+          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+          if (-not (Test-Path $tsPath)) {
+            throw "❌ Falha ao instalar Tailscale"
           }
 
-          Write-Host "🔗 Conectando ao Tailscale..."
-          & "$tailscalePath" up --authkey "$authkey" --hostname "vps-auto" --accept-routes --ssh
+          $authkey = '${{ secrets.TAILSCALE_AUTH_KEY }}'
+          if (-not $authkey) {
+            throw "❌ ERRO: Nenhuma auth key definida em TAILSCALE_AUTH_KEY (secrets)"
+          }
+
+          Write-Host "🔗 Conectando ao Tailscale automaticamente..."
+          & "$tsPath" up --authkey "$authkey" --hostname "gh-runner-${{ github.run_id }}" --accept-routes --ssh
+          
           if ($LASTEXITCODE -ne 0) {
             throw "❌ Falha ao conectar ao Tailscale"
           }
 
-          Write-Host "✅ Conectado ao Tailscale com sucesso!"
-          & "$tailscalePath" ip -4
-
-      # ---------------------------
-      # 4️⃣ Definir senha fixa (para RDP)
-      # ---------------------------
-      - name: 🔐 Definir senha fixa
-        shell: pwsh
-        run: |
-          $password = ConvertTo-SecureString '${{ secrets.RDP_PASSWORD }}' -AsPlainText -Force
-          $username = "runneradmin"
-          Set-LocalUser -Name $username -Password $password
-          Write-Host "✅ Senha fixa definida para $username"
-
-      # ---------------------------
-      # 5️⃣ Mostrar credenciais RDP
-      # ---------------------------
-      - name: 🪪 Mostrar credenciais RDP
-        shell: pwsh
-        run: |
-          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -eq "Ethernet" }).IPAddress
-          Write-Host "🖥️ Use as credenciais abaixo para conectar via RDP:"
-          Write-Host "Usuário: runneradmin"
-          Write-Host "Senha: ${{ secrets.RDP_PASSWORD }}"
-          Write-Host "IP Local: $ip"
-          Write-Host "🔗 IP Tailscale (recomendado):"
-          & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-
-      # ---------------------------
-      # 6️⃣ Manter VPS ativa
-      # ---------------------------
-      - name: ♻️ Mantendo VPS ativa
-        shell: pwsh
-        run: |
-          Write-Host "⏳ Mantendo VPS ativa por tempo indeterminado..."
-          while ($true) {
-            Start-Sleep -Seconds 60
+          # Capturar IP
+          $tsIP = (& "$tsPath" ip -4 | Select-Object -First 1).Trim()
+          if (-not $tsIP) {
+            throw "❌ Nenhum IP Tailscale encontrado"
           }
 
+          Write-Host "✅ Conectado ao Tailscale com IP: $tsIP"
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
       # ---------------------------
-      # 7️⃣ Fazer backup final da Área de Trabalho
+      # 4️⃣ Testar conexão RDP via Tailscale
       # ---------------------------
-      - name: 💾 Fazer backup da Área de Trabalho
-        if: always()
+      - name: 🔍 Testar acesso RDP
         shell: pwsh
         run: |
-          $backup = "$env:USERPROFILE\Desktop_Backup"
-          $desktop = "$env:USERPROFILE\Desktop"
-          New-Item -ItemType Directory -Force -Path $backup | Out-Null
-          Copy-Item -Path "$desktop\*" -Destination $backup -Recurse -Force
-          Write-Host "✅ Backup salvo em $backup"
+          $tsIP = $env:TAILSCALE_IP
+          Write-Host "🖧 Testando acesso a $tsIP:3389 ..."
+          $test = Test-NetConnection -ComputerName $tsIP -Port 3389
+          if (-not $test.TcpTestSucceeded) {
+            throw "❌ Porta RDP 3389 inacessível via Tailscale"
+          }
+          Write-Host "✅ Porta RDP 3389 acessível via Tailscale"
+
+      # ---------------------------
+      # 5️⃣ Exibir informações e manter VPS ativa
+      # ---------------------------
+      - name: 🕓 VPS Ativa e Informações
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "================== RDP ACCESS =================="
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host "Usuário: RDP"
+          Write-Host "Senha: ${{ secrets.RDP_PASSWORD }}"
+          Write-Host "================================================"
+          Write-Host ""
+          Write-Host "💡 Conecte-se via Tailscale + RDP (IP acima)."
+          Write-Host "🌐 O Tailscale já está autenticado automaticamente."
+          Write-Host "⚡ VPS ativa até cancelamento manual."
+          Write-Host ""
+
+          while ($true) {
+            Write-Host "[$(Get-Date)] VPS ativa e aguardando conexão..."
+            Start-Sleep -Seconds 300
+          }
